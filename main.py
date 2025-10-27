@@ -991,7 +991,7 @@ class AntiTriggerFingersApp(ctk.CTk):
 
         # play reset/main sound (010) if available
         try:
-            self.play_sounds_sequential("010.mp3")
+            self.play_sounds_sequential("008.mp3")
         except Exception as e:
             print(f"[reset_action] play sound error: {e}")
 
