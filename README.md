@@ -25,7 +25,7 @@
 ![Main UI](pictures/main.png)
 
 **รายงานย้อนหลัง:**
-![History Page](pictures/history.png)
+![History Page](pictures/log.png)
 ---
 
 ## 🚀 วิธีใช้งาน (Usage)
