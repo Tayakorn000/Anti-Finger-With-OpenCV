@@ -1,7 +1,5 @@
 # AI-Powered Anti-Trigger Fingers With OpenCV
 
-![Logo](pictures/logo.png)
-
 **AI-Powered Anti-Trigger Fingers** เป็นแอปพลิเคชันสำหรับฝึกท่ามือ ป้องกันนิ้วล็อค (Trigger Fingers) ด้วย **คอมพิวเตอร์วิชัน** แบบเรียลไทม์ พร้อม **จับเวลา, แสดงภาพตัวอย่างท่า, และเสียงประกอบ**  
 
 ---
