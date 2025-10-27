@@ -84,7 +84,7 @@ AntiTriggerFingers/
 🔔 License
 -OPEN SOURCE 
 
-👨‍💻 ผู้พัฒนา (Author)
+👨‍💻 Author
 Tayakorn Wetchakun
 GitHub: https://github.com/tayakorn000
 Email: tayakornwet@gmail.com
