@@ -45,7 +45,7 @@
 
 ⚙️ การติดตั้ง (Installation)
 
-1.ติดตั้ง Python 3.11+
+1.ติดตั้ง Python 3.11+ (Recommend 3.11.9)
 
 2.สร้าง Virtual Environment
 
