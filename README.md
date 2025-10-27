@@ -51,7 +51,7 @@ venv\Scripts\activate      # Windows
 
 ติดตั้ง dependencies:
 ```bash
-pip installopencv-python mediapipe Pillow customtkinter pygame
+pip install opencv-python mediapipe Pillow customtkinter pygame
 ```
 
 📁 โครงสร้างโปรเจกต์ (Project Structure)
