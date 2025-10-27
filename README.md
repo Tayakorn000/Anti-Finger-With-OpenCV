@@ -62,7 +62,6 @@ pip install opencv-python mediapipe Pillow customtkinter pygame
 
 📁 โครงสร้างโปรเจกต์ (Project Structure)
 ```bash
-คัดลอกโค้ด
 AntiTriggerFingers/
 │
 ├─ main.py                 # ไฟล์หลักรันแอป
