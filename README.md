@@ -97,7 +97,7 @@ AntiTriggerFingers/
 
 👨‍💻 Author
 
-Tayakorn Wetchakun
+Tayakorn000,Achidesu
 
 GitHub: https://github.com/tayakorn000
 
