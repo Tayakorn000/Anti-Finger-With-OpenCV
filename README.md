@@ -65,7 +65,6 @@ pip install opencv-python mediapipe Pillow customtkinter pygame
 AntiTriggerFingers/
 │
 ├─ main.py                 # ไฟล์หลักรันแอป
-├─ requirements.txt        # dependencies
 ├─ Anti-Finger.txt         # บันทึกประวัติการฝึก
 ├─ Voices/                 # โฟลเดอร์ไฟล์เสียง
 │   ├─ 001.mp3
