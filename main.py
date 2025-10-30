@@ -14,13 +14,21 @@
 # ============================================================
 
 # ==== Library Imports =======================================
+from logging import root
 from PIL import Image, ImageTk           # Image processing + Tkinter bridge
 import customtkinter as ctk              # Modern Tkinter look-and-feel
 import cv2                               # OpenCV for camera I/O and image ops
 import mediapipe as mp                   # MediaPipe Hands: landmark detector
 import pygame                            # For playing short sound cues
 import time, threading                   # Threading for background loops, time helpers
-from datetime import datetime            # Timestamps for logging
+from datetime import datetime,timedelta           # Timestamps for logging
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from collections import defaultdict
+import os
+import tkinter as tk
+from tkinter import ttk
 # ============================================================
 
 
@@ -46,7 +54,7 @@ class AntiTriggerFingersApp(ctk.CTk):
         self.title("AI-Powered Anti-trigger Fingers")
         self.attributes("-fullscreen", True)
         self.geometry("1920x1080+0+0")
-        self.overrideredirect(True)                 # hide window frame for kiosk style
+        self.overrideredirect(True)       
         self.bind("<Escape>", lambda e: self.on_close())
         self.resizable(False, False)
         self.configure(fg_color="#FFFFFF")
@@ -71,7 +79,7 @@ class AntiTriggerFingersApp(ctk.CTk):
             "ทำมือคล้ายตะขอ",
             "กำมือ",
             "กำมือแบบเหยียดปลายนิ้ว",
-            "งอโคนนิ้วแต่เหยียดปลายนิ้วมือ"
+            "งอโค้นนิ้วแต่เหยียดปลายนิ้วมือ"
         ]
         self.extent = 0
         self.progress = 0
@@ -84,6 +92,11 @@ class AntiTriggerFingersApp(ctk.CTk):
         if not self.cap.isOpened():
             # Fail gracefully: print message; UI will show placeholder until camera available.
             print("Error: Cannot open webcam")
+        else:
+            print("✓ Camera opened successfully")
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            print(f"✓ Camera set to: {self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)}x{self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)}")
 
         # --------------------
         # UI theming constants
@@ -127,7 +140,7 @@ class AntiTriggerFingersApp(ctk.CTk):
         except FileNotFoundError:
             # Keep a clean textual placeholder instead of crashing.
             self.logo_label = ctk.CTkLabel(
-                self.top_bar_frame, text="LOGO", font=("Sarabun", 20), fg=self.white_fg, bg=self.purple_bg
+                self.top_bar_frame, text="LOGO", font=("Sarabun", 20), text_color=self.white_fg, fg_color=self.purple_bg
             )
             self.logo_label.pack(side="left", padx=20, pady=10)
             print("Warning: logo.png not found. Using text placeholder.")
@@ -312,96 +325,302 @@ class AntiTriggerFingersApp(ctk.CTk):
         # --------------------------------------------------------------------
         self.history_page = ctk.CTkFrame(self, fg_color=self.light_gray_bg_program)
         self.history_title = ctk.CTkLabel(self.history_page, text="รายงานย้อนหลัง", font=("Sarabun", 55, "bold"), text_color=self.black_fg)
-        self.history_title.pack(pady=20)
-        self.history_textbox = ctk.CTkTextbox(self.history_page, width=1000, height=500, font=("Sarabun", 20), text_color=self.black_fg, fg_color="#CCC9C9")
-        self.history_textbox.pack(padx=40, pady=20)
-        self.history_footer = ctk.CTkFrame(self.history_page, fg_color=self.light_gray_bg_program)
-        self.history_footer.pack(fill="x", padx=40, pady=(0, 20))
+        self.history_title.pack(pady=5)
+        
+        # Chart container (กราฟอยู่บนสุด)
+        self.chart_container = tk.Frame(
+            self.history_page,
+            bg="white"
+        )
+        self.chart_container.pack(fill="both", expand=True, padx=40, pady=(10, 5))
+        self.history_content_frame = ctk.CTkFrame(self.history_page, fg_color=self.light_gray_bg_program)
+        self.history_content_frame.pack(fill="x", padx=40, pady=(0, 0))
+
+        # Text box (ซ้าย)
+        self.history_textbox = ctk.CTkTextbox(
+            self.history_content_frame,
+            width=1000,
+            height=250,
+            font=("Sarabun", 20),
+            text_color=self.black_fg,
+            fg_color="#CCC9C9",
+        )
+        self.history_textbox.pack(side="left", padx=100, pady=(0, 0))
+
+        # ปุ่มกลับ (ขวา บรรทัดเดียวกัน)
         self.back_button = ctk.CTkButton(
-            self.history_footer,
+            self.history_content_frame,
             text="กลับ",
             font=("Sarabun", 40, "bold"),
             fg_color="#FF9800",
             text_color="white",
             hover_color="#E68900",
-            command=lambda: self.show_main_page(),
+            command=self.show_main_page,
             height=80,
-            width=260,
+            width=260
         )
-        self.back_button.pack(side="right", padx=140, pady=10)
+        self.back_button.pack(side="right", padx=(70, 100), pady=(100, 0))
 
-        # --------------------------------------------------------------------
-        # Sound setup (pygame mixer)
-        # --------------------------------------------------------------------
-        # Short sounds are played by play_sounds_sequential. If mixer init
-        # fails, the program continues but sound won't play.
         self.pose_sounds = {1: ["001.mp3"], 2: ["002.mp3"], 3: ["003.mp3"], 4: ["004.mp3"], 5: ["005.mp3"]}
+        
+        # ============ HELPER: GET HISTORY FROM FILE ============
+        self.current_chart = None
+
+        # ============ SOUND SETUP ============
         try:
             pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
         except Exception as e:
             # Non-fatal: continue without audio
             print(f"[Sound] Pygame mixer init error: {e}")
 
-        # --------------------------------------------------------------------
-        # Runtime control flags & countdown state
-        # --------------------------------------------------------------------
+        # ============ RUNTIME STATE ============
         self.running = False
         self.countdown_active = False
         self.countdown_job = None
-        self.countdown_remaining = 0
+        self.countdown_total = 0
+        self.countdown_end_time = 0
 
-        # --------------------------------------------------------------------
-        # Start MediaPipe background thread for real-time detection
-        # --------------------------------------------------------------------
-        # The thread captures frames, runs MediaPipe, draws landmarks, computes
-        # finger angles, then schedules UI updates on the main thread using .after.
+        # ============ START MEDIAPIPE THREAD ============
         self.mp_running = True
         self.mp_thread = threading.Thread(target=self._mediapipe_loop, daemon=True)
         self.mp_thread.start()
 
-        # Start the periodic sensor loop that consumes detection results
         self.check_sensor_loop()
 
-        # Ensure we clean up properly on window close
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
-    # ------------------------------
-    # PLAY SOUND (THREAD-SAFE)
-    # ------------------------------
+    def get_history_from_file(self):
+        """Read history from file and return processed data"""
+        FILE_PATH = "Anti-Finger.txt"
+        daily_counts = defaultdict(int)
+        if not os.path.exists(FILE_PATH):
+            return []
+
+        try:
+            with open(FILE_PATH, "r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        date_str = line.split("]")[0][1:]
+                        date = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+                        daily_counts[date.date()] += 1
+                    except:
+                        continue
+        except Exception as e:
+            print(f"Error reading file: {e}")
+            return []
+
+        history = []
+        if not daily_counts:
+            return history
+
+        first_day = min(daily_counts.keys())
+        last_day = max(daily_counts.keys())
+        day = first_day
+        
+        while day <= last_day:
+            count = daily_counts.get(day, 0)
+            sets_done = count // 10
+            progress = min((count / 30) * 100, 100) if count > 0 else 0
+            history.append({
+                'date': datetime.combine(day, datetime.min.time()),
+                'progress': progress,
+                'sets_done': sets_done,
+                'count': count
+            })
+            day += timedelta(days=1)
+
+        history.sort(key=lambda x: x['date'])
+        return history
+
+    def draw_progress_chart(self):
+        """Draw the progress chart in history page"""
+        history = self.get_history_from_file()
+        
+        # Clear previous chart
+        for widget in self.chart_container.winfo_children():
+            widget.destroy()
+
+        if not history:
+            label = tk.Label(self.chart_container, text="No data available", bg="white", font=("Sarabun", 14))
+            label.pack(fill="both", expand=True)
+            return
+
+        try:
+            # Main frame สำหรับ chart + control
+            main_frame = tk.Frame(self.chart_container, bg="white")
+            main_frame.pack(fill=tk.BOTH, expand=True)
+
+            # Chart frame (ซ้าย)
+            chart_frame = tk.Frame(main_frame, bg="white")
+            chart_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+            # Control frame (ขวา)
+            control_frame = tk.Frame(main_frame, bg="white", width=200, height=400)
+            control_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=10, pady=10)
+            control_frame.pack_propagate(False)
+
+            # Dropdown เลือกวัน
+            tk.Label(control_frame, text="Select Date:", bg="white", font=("Sarabun", 14)).pack(anchor='w', pady=5)
+            date_var = tk.StringVar()
+            date_combo = ttk.Combobox(control_frame, textvariable=date_var, width=15, state='readonly')
+            date_combo.pack(anchor='w', padx=5)
+
+            # Legend
+            tk.Label(control_frame, text="\nLegend", bg="white", font=("Sarabun", 12, "bold")).pack(anchor='w', pady=(10, 5))
+            tk.Label(control_frame, text="🔴 Red: <50%", bg="white", fg="red", font=("Sarabun", 12)).pack(anchor='w')
+            tk.Label(control_frame, text="🟢 Green: ≥50%", bg="white", fg="green", font=("Sarabun", 12)).pack(anchor='w')
+            tk.Label(control_frame, text="↑ ดีขึ้น", bg="white", fg="green", font=("Sarabun", 12)).pack(anchor='w')
+            tk.Label(control_frame, text="↓ แย่ลง", bg="white", fg="orange", font=("Sarabun", 12)).pack(anchor='w')
+
+            # Feedback label
+            feedback_label = tk.Label(control_frame, text="", bg="lightyellow", justify='left', wraplength=400, 
+                                     font=("Sarabun", 12), relief=tk.SUNKEN, padx=5, pady=5)
+            feedback_label.pack(fill='x', pady=10, padx=5)
+
+            # Create chart
+            fig, ax = plt.subplots(figsize=(12, 5), dpi=80)
+            fig.patch.set_facecolor('white')
+
+            dates = [h['date'] for h in history]
+            progresses = [h['progress'] for h in history]
+
+            # Prepare OHLC data
+            o, h_, l, c = [], [], [], []
+            prev = progresses[0] if progresses else 0
+            
+            for p in progresses:
+                o.append(prev)
+                c.append(p)
+                high = max(prev, p)
+                low = min(prev, p)
+                h_.append(high)
+                l.append(low)
+                prev = p
+
+            # Draw bars and lines
+            points = []
+            for i, p in enumerate(progresses):
+                prev_prog = progresses[i-1] if i > 0 else None
+                
+                if prev_prog is None:
+                    color = (1, 0, 0) if p < 50 else (0, 1, 0)
+                elif p > prev_prog:
+                    color = (0, 1, 0)
+                elif p < prev_prog:
+                    color = (1, 0.65, 0)
+                else:
+                    color = (1, 0, 0) if p < 50 else (0, 1, 0)
+
+                ax.vlines(dates[i], l[i], h_[i], color=color, linewidth=2)
+                ax.vlines(dates[i], o[i], c[i], color=color, linewidth=8)
+                
+                if prev_prog is not None:
+                    if p > prev_prog:
+                        ax.annotate('↑', xy=(dates[i], c[i]+3), ha='center', color='green', fontsize=12)
+                    elif p < prev_prog:
+                        ax.annotate('↓', xy=(dates[i], c[i]+3), ha='center', color='black', fontsize=12)
+                
+                point, = ax.plot(dates[i], c[i], 'o', color='black', markersize=8)
+                points.append((point, dates[i], p, history[i]['sets_done'], i))
+
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+            ax.set_ylabel("ความสำเร็จ (%)", font={'family': 'Sarabun', 'size': 18, 'weight': 'bold'})
+            ax.set_ylim(0, 110)
+            ax.set_title("สถิติของคุณ", font={'family': 'Sarabun', 'size': 18, 'weight': 'bold'})
+            ax.grid(True, linestyle='--', alpha=0.5)
+            fig.autofmt_xdate()
+            fig.tight_layout()
+
+            canvas = FigureCanvasTkAgg(fig, master=chart_frame)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill="both", expand=True)
+
+            # Populate date combo
+            date_list = [h['date'].strftime('%d-%b-%Y') for h in history]
+            date_combo['values'] = date_list
+            if date_list:
+                date_combo.set(date_list[-1])
+
+            def feedback_text(prog, prev_prog):
+                if prog == 0:
+                    return "วันนี้คุณยังไม่ได้ทำ 🔴"
+                elif prev_prog is not None and prog < prev_prog:
+                    return "วันนี้คุณทำได้น้อยลง ↓"
+                elif prev_prog is not None and prog > prev_prog:
+                    return "วันนี้คุณทำได้ดีขึ้น ↑"
+                elif prog < 50:
+                    return "วันนี้คุณทำได้น้อยลง ↓"
+                else:
+                    return "วันนี้คุณทำได้ตามปกติ ✓"
+
+            def update_feedback(event=None):
+                selected_date_str = date_var.get()
+                if not selected_date_str:
+                    return
+                try:
+                    selected_date = datetime.strptime(selected_date_str, '%d-%b-%Y').date()
+                    idx = next((i for i, h in enumerate(history) if h['date'].date() == selected_date), None)
+                    if idx is not None:
+                        prog = history[idx]['progress']
+                        sets = history[idx]['sets_done']
+                        prev_prog = history[idx-1]['progress'] if idx > 0 else None
+                        fb = feedback_text(prog, prev_prog)
+                        feedback_label.config(text=f"{selected_date_str}\nProgress: {prog:.0f}%\nSets: {sets}\n{fb}")
+                except Exception as e:
+                    print(f"Error: {e}")
+
+            def on_click(event):
+                if event.inaxes != ax:
+                    return
+                for point, date, prog, sets, idx in points:
+                    xdata = mdates.date2num(date)
+                    ydata = prog
+                    if abs(event.xdata - xdata) < 0.3 and abs(event.ydata - ydata) < 5:
+                        prev_prog = progresses[idx-1] if idx > 0 else None
+                        fb = feedback_text(prog, prev_prog)
+                        feedback_label.config(text=f"{date.strftime('%d-%b-%Y')}\nProgress: {prog:.0f}%\nSets: {sets}\n{fb}")
+                        date_var.set(date.strftime('%d-%b-%Y'))
+                        return
+
+            date_combo.bind("<<ComboboxSelected>>", update_feedback)
+            canvas.mpl_connect("button_press_event", on_click)
+
+            # Show initial feedback
+            update_feedback()
+
+            self.current_chart = (fig, canvas)
+
+        except Exception as e:
+            print(f"Error drawing chart: {e}")
+            label = tk.Label(self.chart_container, text=f"Error: {e}", bg="white", font=("Sarabun", 12), fg="red")
+            label.pack(fill="both", expand=True)
+
+    # ============ PLAY SOUND ============
     def play_sounds_sequential(self, filename):
-        """
-        Play a short sound file from Voices/ on a daemon thread.
-        Keeps UI responsive by not blocking the main thread.
-        """
+        """Play a short sound file from Voices/ on a daemon thread."""
         def _play(f=filename):
             try:
                 if not f.endswith(".mp3"):
                     f += ".mp3"
                 sound_path = f"Voices/{f}"
-                sound = pygame.mixer.Sound(sound_path)
-                sound.play()
+                if os.path.exists(sound_path):
+                    sound = pygame.mixer.Sound(sound_path)
+                    sound.play()
             except Exception as e:
-                # Non-fatal; log for developer.
                 print(f"Sound error: {e}")
 
         threading.Thread(target=_play, daemon=True).start()
 
-    # ------------------------------
-    # HISTORY & REPORTING
-    # ------------------------------
+    # ============ HISTORY UI ============
     def load_history(self):
-        """
-        Load the last N lines from Anti-Finger.txt and display in the
-        history textbox. This function re-schedules itself every 2 seconds
-        to keep the view up-to-date while the history page is visible.
-        """
+        """Load history text from file"""
         try:
             with open("Anti-Finger.txt", "r", encoding="utf-8") as f:
                 lines = f.readlines()
         except FileNotFoundError:
             lines = ["No history found.\n"]
 
-        max_lines = 13
+        max_lines = 1000000000000
         if len(lines) > max_lines:
             lines = lines[-max_lines:]
 
@@ -410,96 +629,57 @@ class AntiTriggerFingersApp(ctk.CTk):
         self.history_textbox.insert("end", "".join(lines))
         self.history_textbox.see("end")
         self.history_textbox.configure(state="disabled")
-        # Re-run periodically while history page is shown
-        self.after(2000, self.load_history)
 
     def show_main_page(self):
-        """
-        Return to main UI from history page and play a small audio cue.
-        """
         self.history_page.pack_forget()
         self.main_content_frame.pack(side="top", fill="both", expand=True, pady=20)
         self.play_sounds_sequential("010.mp3")
 
     def show_history_page(self):
-        """
-        Switch to history page and begin refreshing the history view.
-        """
         self.main_content_frame.pack_forget()
         self.play_sounds_sequential("009.mp3")
         self.history_page.pack(side="top", fill="both", expand=True, pady=20)
+        self.draw_progress_chart()
         self.load_history()
 
     def write_log(self, message):
-        """
-        Append a single log line to Anti-Finger.txt including a timestamp,
-        set/round context, and the provided message.
-        """
         now = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
         log_message = f"{now} เซ็ตที่ {self.set} ครั้งที่ {self.round} : {message}"
-        with open("Anti-Finger.txt", "a", encoding="utf-8") as f:
-            f.write(log_message + "\n")
-        print(log_message)
+        try:
+            with open("Anti-Finger.txt", "a", encoding="utf-8") as f:
+                f.write(log_message + "\n")
+            print(log_message)
+        except Exception as e:
+            print(f"Error writing log: {e}")
 
-    # ------------------------------
-    # SIMPLE CAMERA-BASED FALLBACK CHECK
-    # ------------------------------
+    # ============ CAMERA CHECK (FALLBACK) ============
     def check_fingers(self):
-        """
-        A simple (fallback / legacy) detector that thresholds the grayscale frame
-        and counts white pixels. This function is still called by the sensor loop
-        as a lightweight check if you want to use a different metric or debug.
-        """
-        ret, frame = self.cap.read()
-        if not ret:
-            print("[Debug] Failed to grab frame")
-            return
+        try:
+            ret, frame = self.cap.read()
+            if not ret:
+                return
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)[1]
+            white_pixels = cv2.countNonZero(thresh)
+            if white_pixels > 50000:
+                if self.hand_posit < 5:
+                    self.hand_posit += 1
+        except Exception as e:
+            print(f"[check_fingers] Error: {e}")
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)[1]
-        white_pixels = cv2.countNonZero(thresh)
-        print(f"[Debug] White pixels: {white_pixels}")
-
-        # Very coarse rule: if many white pixels found, increment hand_posit
-        if white_pixels > 50000:
-            if self.hand_posit < 5:
-                self.hand_posit += 1
-                # update_pic is a placeholder in the original file (no-op)
-                self.update_pic()
-
-    # ------------------------------
-    # BACKGROUND: MEDIAPIPE LOOP
-    # ------------------------------
+    # ============ MEDIAPIPE BACKGROUND LOOP ============
     def _mediapipe_loop(self):
-        """
-        Background thread: continuously read frames from camera, run MediaPipe
-        hand detection, compute per-finger angles and pose-match logic,
-        draw landmarks on the frame, and schedule UI updates (camera preview
-        + pose detection result) on the main thread via .after.
-
-        Important:
-          - This thread must never perform UI operations directly.
-          - Instead, it prepares a PIL image and calls self.after(0, ...)
-            to hand over the image to the main Tk event loop.
-        """
+        """Background MediaPipe detection thread"""
         mp_hands = mp.solutions.hands
         mp_drawing = mp.solutions.drawing_utils
         drawing_spec_landmark = mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=4)
         drawing_spec_connection = mp_drawing.DrawingSpec(color=(255, 0, 0), thickness=2, circle_radius=2)
 
-        # Create a MediaPipe Hands object configured for live detection.
         hands = mp_hands.Hands(
-            static_image_mode=False,
-            max_num_hands=1,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
+            static_image_mode=False, max_num_hands=1,
+            min_detection_confidence=0.5, min_tracking_confidence=0.5
         )
 
-        # --------------------------------------------------------------------
-        # Configuration: pose thresholds for each finger per pose index.
-        # Each entry is a list of (min_angle, max_angle) for
-        # (thumb, index, middle, ring, pinky).
-        # --------------------------------------------------------------------
         pose_ranges = {
             1: [(0, 200), (150, 185), (150, 185), (150, 185), (150, 185)],
             2: [(0, 200), (40, 170), (40, 170), (40, 170), (40, 170)],
@@ -509,10 +689,6 @@ class AntiTriggerFingersApp(ctk.CTk):
         }
 
         def _angle_between(a, b):
-            """
-            Compute the 2D angle (degrees) between vectors a and b.
-            Returns 0.0 if either vector has zero length.
-            """
             import math
             ax, ay = a
             bx, by = b
@@ -526,133 +702,88 @@ class AntiTriggerFingersApp(ctk.CTk):
 
         try:
             while self.mp_running:
-                # ----------------
-                # Capture frame
-                # ----------------
                 ret, frame = self.cap.read()
                 if not ret:
-                    # If capture fails repeatedly, yield CPU and continue
+                    print("[MediaPipe] Frame capture failed, retrying...")
                     time.sleep(0.01)
                     continue
 
-                # Mirror the frame for a natural selfie view
                 frame = cv2.flip(frame, 1)
                 h, w = frame.shape[:2]
-
-                # Convert to RGB for MediaPipe processing
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = hands.process(rgb)
 
-                # Initialize angle variables and match flag
-                thumb_a = index_a = middle_a = ring_a = pinky_a = None
+                # Initialize angles with default values
+                thumb_a = index_a = middle_a = ring_a = pinky_a = 0
                 pose_match = False
 
-                # If a hand is detected, compute angles and draw landmarks
                 if results.multi_hand_landmarks:
                     for hand_landmarks in results.multi_hand_landmarks:
-                        # Draw landmarks & connections on the BGR frame for debugging/display
                         mp_drawing.draw_landmarks(
-                            frame,
-                            hand_landmarks,
-                            mp_hands.HAND_CONNECTIONS,
-                            drawing_spec_landmark,
-                            drawing_spec_connection,
+                            frame, hand_landmarks, mp_hands.HAND_CONNECTIONS,
+                            drawing_spec_landmark, drawing_spec_connection
                         )
 
                         lm = hand_landmarks.landmark
 
                         def to_pt(idx):
-                            # Convert normalized landmark coordinates to image pixels
                             return (lm[idx].x * w, lm[idx].y * h)
 
-                        # Use wrist as a common origin for the simple angle test
                         wrist = to_pt(0)
 
-                        # Thumb: compute vector between MCP (2) and tip (4)
-                        thumb_mcp = to_pt(2)
-                        thumb_tip = to_pt(4)
-                        v1 = (thumb_tip[0] - thumb_mcp[0], thumb_tip[1] - thumb_mcp[1])
-                        v2 = (wrist[0] - thumb_mcp[0], wrist[1] - thumb_mcp[1])
+                        # Thumb
+                        v1 = (to_pt(4)[0] - to_pt(2)[0], to_pt(4)[1] - to_pt(2)[1])
+                        v2 = (wrist[0] - to_pt(2)[0], wrist[1] - to_pt(2)[1])
                         thumb_a = _angle_between(v1, v2)
 
-                        # Index finger (MCP=5, tip=8)
-                        idx_mcp = to_pt(5)
-                        idx_tip = to_pt(8)
-                        v1 = (idx_tip[0] - idx_mcp[0], idx_tip[1] - idx_mcp[1])
-                        v2 = (wrist[0] - idx_mcp[0], wrist[1] - idx_mcp[1])
+                        # Index
+                        v1 = (to_pt(8)[0] - to_pt(5)[0], to_pt(8)[1] - to_pt(5)[1])
+                        v2 = (wrist[0] - to_pt(5)[0], wrist[1] - to_pt(5)[1])
                         index_a = _angle_between(v1, v2)
 
-                        # Middle finger (MCP=9, tip=12)
-                        mid_mcp = to_pt(9)
-                        mid_tip = to_pt(12)
-                        v1 = (mid_tip[0] - mid_mcp[0], mid_tip[1] - mid_mcp[1])
-                        v2 = (wrist[0] - mid_mcp[0], wrist[1] - mid_mcp[1])
+                        # Middle
+                        v1 = (to_pt(12)[0] - to_pt(9)[0], to_pt(12)[1] - to_pt(9)[1])
+                        v2 = (wrist[0] - to_pt(9)[0], wrist[1] - to_pt(9)[1])
                         middle_a = _angle_between(v1, v2)
 
-                        # Ring finger (MCP=13, tip=16)
-                        ring_mcp = to_pt(13)
-                        ring_tip = to_pt(16)
-                        v1 = (ring_tip[0] - ring_mcp[0], ring_tip[1] - ring_mcp[1])
-                        v2 = (wrist[0] - ring_mcp[0], wrist[1] - ring_mcp[1])
+                        # Ring
+                        v1 = (to_pt(16)[0] - to_pt(13)[0], to_pt(16)[1] - to_pt(13)[1])
+                        v2 = (wrist[0] - to_pt(13)[0], wrist[1] - to_pt(13)[1])
                         ring_a = _angle_between(v1, v2)
 
-                        # Pinky (MCP=17, tip=20)
-                        pinky_mcp = to_pt(17)
-                        pinky_tip = to_pt(20)
-                        v1 = (pinky_tip[0] - pinky_mcp[0], pinky_tip[1] - pinky_mcp[1])
-                        v2 = (wrist[0] - pinky_mcp[0], wrist[1] - pinky_mcp[1])
+                        # Pinky
+                        v1 = (to_pt(20)[0] - to_pt(17)[0], to_pt(20)[1] - to_pt(17)[1])
+                        v2 = (wrist[0] - to_pt(17)[0], wrist[1] - to_pt(17)[1])
                         pinky_a = _angle_between(v1, v2)
 
-                        # ----------------------------
-                        # Pose matching: compare each
-                        # finger angle to pose thresholds
-                        # ----------------------------
                         reqs = pose_ranges.get(self.current_pose, pose_ranges[1])
                         angles = [thumb_a, index_a, middle_a, ring_a, pinky_a]
+                        
                         ok = True
                         for ang, (mn, mx) in zip(angles, reqs):
-                            if ang is None:
-                                ok = False
-                                break
-                            # If any finger falls outside the configured range, not matched
-                            if not (mn <= ang <= mx):
+                            if ang is None or not (mn <= ang <= mx):
                                 ok = False
                                 break
                         pose_match = ok
 
-                        # Overlay small status text on the working frame (debug-friendly)
                         try:
-                            cv2.putText(
-                                frame,
-                                f"Match:{'YES' if pose_match else 'NO'}",
-                                (10, 180),
-                                cv2.FONT_HERSHEY_SIMPLEX,
-                                0.6,
-                                (0, 200, 0) if pose_match else (0, 0, 200),
-                                2,
-                            )
+                            cv2.putText(frame, f"Match:{'YES' if pose_match else 'NO'}", (10, 180),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 0) if pose_match else (0, 0, 200), 2)
                         except Exception:
-                            # Non-fatal drawing error (different OpenCV builds can vary)
                             pass
 
-                # ----------------------------
-                # Convert frame to PIL Image and crop/resize to camera label size
-                # ----------------------------
                 display_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 pil_img = Image.fromarray(display_rgb)
 
-                # Crop-and-resize helper to fill the camera area without letterboxing
                 def _crop_and_resize(img, target_w, target_h):
                     src_w, src_h = img.size
                     target_ratio = target_w / target_h
                     src_ratio = src_w / src_h
                     if src_ratio > target_ratio:
-                        # image is wider -> crop left/right
                         new_w = int(src_h * target_ratio)
                         left = (src_w - new_w) // 2
                         img = img.crop((left, 0, left + new_w, src_h))
                     else:
-                        # image is taller -> crop top/bottom
                         new_h = int(src_w / target_ratio)
                         top = (src_h - new_h) // 2
                         img = img.crop((0, top, src_w, top + new_h))
@@ -660,64 +791,36 @@ class AntiTriggerFingersApp(ctk.CTk):
 
                 pil_img = _crop_and_resize(pil_img, self.camera_width, self.camera_height)
 
-                # Schedule UI update on main thread (safe: using self.after)
                 try:
-                    # We pass the pil image and the computed angles/match flag
                     self.after(0, lambda im=pil_img, a=(thumb_a, index_a, middle_a, ring_a, pinky_a), m=pose_match: (
                         self._update_camera_label(im),
                         self._apply_pose_detection(a, m)
                     ))
                 except RuntimeError:
-                    # If the Tk mainloop is shutting down, break out of loop
                     break
 
-                # Small sleep to reduce CPU usage and control frame rate
                 time.sleep(0.02)
         finally:
-            # Ensure resources are cleaned up when thread ends
             hands.close()
 
-    # ------------------------------
-    # APPLY POSE DETECTION RESULT (MAIN THREAD)
-    # ------------------------------
     def _apply_pose_detection(self, angles, match):
-        """
-        Main-thread handler that consumes pose-match boolean from the
-        background thread and updates the short-term positive counter
-        self.hand_posit which the sensor loop uses to decrement the timer.
-        """
         try:
             if match:
-                # Use a short hysteresis: require consecutive matches to progress
                 if self.hand_posit < 5:
                     self.hand_posit += 1
             else:
-                # Reset on mismatch (strict behavior)
                 self.hand_posit = 0
         except Exception as e:
             print(f"[Pose Apply] {e}")
 
-    # ------------------------------
-    # UPDATE CAMERA LABEL (MAIN THREAD)
-    # ------------------------------
     def _update_camera_label(self, pil_image):
-        """
-        Convert PIL image into a PhotoImage and set it on the camera Label.
-        Using self.camera_photo reference prevents garbage collection.
-        """
         try:
             self.camera_photo = ImageTk.PhotoImage(pil_image)
             self.camera_label.configure(image=self.camera_photo)
         except Exception as e:
             print(f"[Camera Update] {e}")
 
-    # ------------------------------
-    # TIMER & UI UPDATE HELPERS
-    # ------------------------------
     def timer_reset(self):
-        """
-        Reset timer state to initial values for the new pose.
-        """
         self.time_current = self.time_max
         self.hand_posit = 0
         self.update_timer()
@@ -728,27 +831,15 @@ class AntiTriggerFingersApp(ctk.CTk):
             pass
 
     def update_pic(self):
-        """
-        Placeholder method in original project; kept as no-op to avoid
-        changing runtime behavior. Could be used to update a large
-        example or camera overlay.
-        """
         return
 
     def reset_pic(self):
-        """
-        Reset the timer canvas drawing to a neutral circular state.
-        """
         self.timer_canvas.delete("progress")
         l = self.timer_pad
         r = self.timer_canvas_size - self.timer_pad
         self.timer_canvas.create_oval(l, l, r, r, outline="#3CB371", width=10, tags="progress")
 
     def update_timer(self):
-        """
-        Prepare and start a 1-second smoothing animation for the timer display.
-        Uses an interpolated arc update executed by _animate_timer.
-        """
         try:
             prev_time = self.time_current + 1
             from_prog = max(0.0, min(1.0, (self.time_max - prev_time) / float(self.time_max)))
@@ -766,10 +857,6 @@ class AntiTriggerFingersApp(ctk.CTk):
             print(f"[update_timer] {e}")
 
     def _animate_timer(self):
-        """
-        Animation loop for a single second of timer interpolation.
-        Updates arc extent and central countdown number smoothly.
-        """
         try:
             now = time.time()
             elapsed = now - self._timer_anim_start
@@ -780,7 +867,6 @@ class AntiTriggerFingersApp(ctk.CTk):
             self.timer_canvas.delete("progress")
             l = self.timer_pad
             r = self.timer_canvas_size - self.timer_pad
-            # Draw arc (clockwise negative extent to create a clockwise progress)
             self.timer_canvas.create_arc(l, l, r, r, start=-90, extent=-extent, style="arc", width=10, outline="#3CB371", tags="progress")
 
             try:
@@ -793,10 +879,8 @@ class AntiTriggerFingersApp(ctk.CTk):
             self.timer_canvas.itemconfig(self.timer_text, text=str(secs))
 
             if t < 1.0:
-                # Continue animation at ~20 FPS
                 self.timer_anim_job = self.after(50, self._animate_timer)
             else:
-                # Finalize and set static arc for new timer value
                 self.timer_anim_job = None
                 self.timer_canvas.delete("progress")
                 l = self.timer_pad
@@ -808,9 +892,6 @@ class AntiTriggerFingersApp(ctk.CTk):
             self.timer_anim_job = None
 
     def _stop_timer_animation(self):
-        """
-        Stops any running timer animation and draws the static progress state.
-        """
         try:
             if self.timer_anim_job:
                 try:
@@ -828,70 +909,40 @@ class AntiTriggerFingersApp(ctk.CTk):
         except Exception as e:
             print(f"[_stop_timer_animation] {e}")
 
-    # ------------------------------
-    # UI textual updates
-    # ------------------------------
     def update_text(self):
-        """
-        Refresh displayed pose name and index on the main UI.
-        """
         self.Label_pose_action_text.configure(text=f"{self.pose_name[self.current_pose]}")
         self.Label_pose_thai_text.configure(text=f"ท่าที่ {self.current_pose}")
 
     def update_round(self):
-        """
-        Refresh the displayed round and set counters.
-        """
         self.Label_set_times_number.configure(text=f"{self.round}")
         self.Label_set_number.configure(text=f"{self.set}")
 
     def update_EX_pose(self):
-        """
-        Update the example pose image on the right panel.
-        Silently fails if the file is missing (non-fatal).
-        """
         try:
             small_hand_image_pil = Image.open(f"pictures/EX_POSE/pose{self.current_pose}.png")
             small_hand_image_pil = small_hand_image_pil.resize((300, 300))
             self.small_hand_photo = ImageTk.PhotoImage(small_hand_image_pil)
             self.small_hand_label.configure(image=self.small_hand_photo)
         except:
-            # Missing file or I/O error; keep previous image
             pass
 
-    # ------------------------------
-    # CONTROL: Start / Pause / Countdown
-    # ------------------------------
     def toggle_start_pause(self):
-        """
-        Start or stop the training session:
-          - When starting: switch button visuals, run a short countdown, enable running flag
-          - When stopping: cancel countdown, disable running flag, play stop sound
-        """
         if self.start_stop_button.cget("text") == "เริ่มต้น":
-            # Switch to 'Stop' state and begin short countdown
             self.start_stop_button.configure(text="หยุด", fg_color=self.yellow_btn, hover_color=self.hover_yellow_bt)
-            self.start_pose_countdown(2)  # 2-second warmup countdown before timer starts decrementing
+            self.start_pose_countdown(2)
             self.play_sounds_sequential("006.mp3")
             if self.current_pose == 1:
                 try:
-                    # Play the pose voice after a short delay for user guidance
                     self.after(1500, lambda: self.play_sounds_sequential(self.pose_sounds[self.current_pose][0]))
                 except Exception:
                     pass
         else:
-            # Stop / cancel
             self.start_stop_button.configure(text="เริ่มต้น", fg_color=self.green_btn, hover_color=self.hover_green_bt)
             self.running = False
             self._cancel_countdown()
             self.play_sounds_sequential("007.mp3")
 
     def start_pose_countdown(self, seconds: int):
-        """
-        Begin a countdown shown on the timer canvas. When the countdown
-        completes, sets self.running = True so the sensor loop decrements
-        the active pose timer.
-        """
         self._cancel_countdown()
         self.countdown_active = True
         self.countdown_total = max(1, seconds)
@@ -899,17 +950,12 @@ class AntiTriggerFingersApp(ctk.CTk):
         self.countdown_job = self.after(0, self._animate_countdown)
 
     def _animate_countdown(self):
-        """
-        Smooth visual countdown animation that updates the timer canvas
-        every ~50 ms. When countdown finishes, set running=True.
-        """
         if not self.countdown_active:
             return
         import math, time as _time
         now = _time.time()
         remaining = self.countdown_end_time - now
         if remaining <= 0:
-            # Countdown finished: enable the sensor loop behavior
             self.countdown_active = False
             self.countdown_job = None
             self.running = True
@@ -925,7 +971,6 @@ class AntiTriggerFingersApp(ctk.CTk):
         frac = max(0.0, min(1.0, remaining / float(self.countdown_total)))
         extent = 360 * frac
 
-        # Draw clockwise orange countdown arc and numeric seconds remaining
         try:
             self.timer_canvas.delete("progress")
             l = self.timer_pad
@@ -936,7 +981,6 @@ class AntiTriggerFingersApp(ctk.CTk):
         except Exception:
             pass
 
-        # schedule next animation frame (~50ms)
         try:
             self.countdown_job = self.after(50, self._animate_countdown)
         except Exception:
@@ -944,10 +988,6 @@ class AntiTriggerFingersApp(ctk.CTk):
             self.countdown_job = None
 
     def _cancel_countdown(self):
-        """
-        Cancel any active countdown and reset the timer canvas to the
-        static initial timer display.
-        """
         if self.countdown_active:
             self.countdown_active = False
             if self.countdown_job:
@@ -965,22 +1005,13 @@ class AntiTriggerFingersApp(ctk.CTk):
             except Exception:
                 pass
 
-    # ------------------------------
-    # RESET UI / SESSION
-    # ------------------------------
     def reset_action(self):
-        """
-        Reset the training session to default values and cancel any active
-        countdown or running session. Also plays a reset sound.
-        """
-        # stop activity and cancel any countdowns
         self.running = False
         try:
             self._cancel_countdown()
         except Exception:
             pass
 
-        # reset UI state and counters
         self.start_stop_button.configure(text="เริ่มต้น", fg_color=self.green_btn, hover_color=self.hover_green_bt)
         self.round = 0
         self.set = 0
@@ -989,21 +1020,14 @@ class AntiTriggerFingersApp(ctk.CTk):
         self.update_text()
         self.update_round()
 
-        # play reset/main sound (010) if available
         try:
             self.play_sounds_sequential("008.mp3")
         except Exception as e:
             print(f"[reset_action] play sound error: {e}")
 
-    # ------------------------------
-    # CLEANUP & EXIT
-    # ------------------------------
     def on_close(self):
-        """
-        Gracefully stop background threads and release camera resource
-        before destroying the main window.
-        """
         self.mp_running = False
+        self.running = False
         try:
             if hasattr(self, "mp_thread") and self.mp_thread.is_alive():
                 self.mp_thread.join(timeout=1.0)
@@ -1015,26 +1039,13 @@ class AntiTriggerFingersApp(ctk.CTk):
         except Exception:
             pass
         self.destroy()
-
-    # ------------------------------
-    # PERIODIC SENSOR LOOP
-    # ------------------------------
     def check_sensor_loop(self):
-        """
-        Periodic loop scheduled on the main thread (via .after).
-        If running, it checks the 'hand_posit' counter and decrements the
-        pose timer (time_current) when hand_posit indicates a stable match.
-        When the timer reaches zero, schedule _on_pose_success.
-        This loop re-schedules itself every 1 second.
-        """
         if self.running:
             try:
-                # Lightweight fallback / debug detector
                 self.check_fingers()
             except Exception as e:
                 print(f"[check_sensor_loop] check_fingers error: {e}")
 
-            # If we have consistent positive detections, decrement the timer
             if self.hand_posit == 5 and self.time_current > 0 and not self.still_hold:
                 try:
                     self.time_current -= 1
@@ -1045,45 +1056,31 @@ class AntiTriggerFingersApp(ctk.CTk):
                 if self.time_current <= 0:
                     try:
                         delay_ms = int(getattr(self, "_timer_anim_duration", 1.0) * 1000) + 50
-                        # Allow animation to finish, then call success handler
                         self.after(delay_ms, self._on_pose_success)
                     except Exception as e:
                         print(f"[check_sensor_loop] scheduling _on_pose_success error: {e}")
 
-        # always reschedule the sensor loop (1-second cadence)
         try:
             self.after(1000, self.check_sensor_loop)
         except Exception as e:
             print(f"[check_sensor_loop] scheduling error: {e}")
 
-    # ------------------------------
-    # POSE SUCCESS / ADVANCE LOGIC
-    # ------------------------------
     def _on_pose_success(self):
-        """
-        Called when the user successfully holds the current pose for the
-        required duration. Writes to history, advances pose/round counters,
-        updates UI, and plays the next pose sound if available.
-        """
         try:
             if self.time_current > 0:
-                # Spurious call guard
                 return
-            self.write_log(f"ท่า{self.pose_name[self.current_pose]}สําเร็จ!")
+            self.write_log(f"ท่า{self.pose_name[self.current_pose]}สำเร็จ!")
         except Exception as e:
             print(f"[_on_pose_success] write_log error: {e}")
 
-        # Advance to next pose. Wrap-around after pose 5 and advance round/set counters.
         self.current_pose += 1
         if self.current_pose > 5:
             self.current_pose = 1
             self.round += 1
             if self.round >= 10:
-                # After completing 10 rounds, increment set count and reset round
                 self.round = 0
                 self.set += 1
 
-        # Update UI and prepare the timer for the next pose
         try:
             self.update_round()
             self.timer_reset()
