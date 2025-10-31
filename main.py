@@ -26,7 +26,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from collections import defaultdict
-import os
+import sys,os
 import tkinter as tk
 from tkinter import ttk
 # ============================================================
@@ -1039,6 +1039,8 @@ class AntiTriggerFingersApp(ctk.CTk):
         except Exception:
             pass
         self.destroy()
+        os._exit(0)
+        
     def check_sensor_loop(self):
         if self.running:
             try:
