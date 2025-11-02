@@ -34,17 +34,7 @@ from tkinter import ttk
 
 # --- Main Application Class ---
 class AntiTriggerFingersApp(ctk.CTk):
-    """
-    Main application window.
 
-    Responsibilities:
-      - Build and manage the UI (CustomTkinter)
-      - Run a background MediaPipe thread to detect hands
-      - Run a periodic sensor loop that uses detection results to
-        decrement a pose timer, trigger success events, and log history
-      - Play short sound cues via pygame
-      - Handle app lifecycle (start/stop/close)
-    """
 
     def __init__(self):
         # --------------------
@@ -392,41 +382,61 @@ class AntiTriggerFingersApp(ctk.CTk):
     def get_history_from_file(self):
         """Read history from file and return processed data"""
         FILE_PATH = "Anti-Finger.txt"
-        daily_counts = defaultdict(int)
+        DAILY_TARGET_REPS = 30  # change this if your daily target (in reps) differs
+        poses_per_rep = 5
+        reps_per_set = 10
+
+        daily_poses = defaultdict(int)
+
         if not os.path.exists(FILE_PATH):
             return []
 
         try:
             with open(FILE_PATH, "r", encoding="utf-8") as f:
                 for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # Expect lines like: [2025-10-01 08:00:07] เซ็ตที่ 1 ครั้งที่ 1 ท่าที่ 1 : ...
+                    if not line.startswith("["):
+                        continue
                     try:
                         date_str = line.split("]")[0][1:]
                         date = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-                        daily_counts[date.date()] += 1
-                    except:
+                        daily_poses[date.date()] += 1
+                    except Exception:
+                        # if parsing fails, skip this line
                         continue
         except Exception as e:
             print(f"Error reading file: {e}")
             return []
 
-        history = []
-        if not daily_counts:
-            return history
+        if not daily_poses:
+            return []
 
-        first_day = min(daily_counts.keys())
-        last_day = max(daily_counts.keys())
+        history = []
+        first_day = min(daily_poses.keys())
+        last_day = max(daily_poses.keys())
         day = first_day
-        
+
         while day <= last_day:
-            count = daily_counts.get(day, 0)
-            sets_done = count // 10
-            progress = min((count / 30) * 100, 100) if count > 0 else 0
+            poses = daily_poses.get(day, 0)
+            reps = poses // poses_per_rep            # full repetitions (1 rep = 5 poses)
+            sets_done = reps // reps_per_set        # full sets (1 set = 10 reps)
+            # progress as percent of DAILY_TARGET_REPS (in reps)
+            if DAILY_TARGET_REPS > 0:
+                progress = min((reps / float(DAILY_TARGET_REPS)) * 100.0, 100.0)
+            else:
+                progress = 0.0
+
             history.append({
                 'date': datetime.combine(day, datetime.min.time()),
-                'progress': progress,
+                'poses': poses,
+                'reps': reps,
                 'sets_done': sets_done,
-                'count': count
+                'progress': progress,
             })
+
             day += timedelta(days=1)
 
         history.sort(key=lambda x: x['date'])

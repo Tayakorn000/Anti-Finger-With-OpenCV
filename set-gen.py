@@ -3,13 +3,13 @@ import random
 
 FILE_PATH = "Anti-Finger.txt"
 
-# กำหนดจำนวนวัน
+# จำนวนวัน
 num_days = 30
 
-# ตั้งค่าเริ่มต้นวัน
+# วันเริ่มต้น
 start_date = datetime(2025, 10, 1, 8, 0, 0)
 
-# รายการท่าฝึก
+# รายการท่าฝึก (5 ท่า)
 exercises = [
     "ท่าเหยียดมือตรงสําเร็จ!",
     "ท่าทำมือคล้ายตะขอสําเร็จ!",
@@ -20,25 +20,21 @@ exercises = [
 
 with open(FILE_PATH, "w", encoding="utf-8") as f:
     for day_offset in range(num_days):
-        # วันปัจจุบัน
         day = start_date + timedelta(days=day_offset)
         
-        # จำนวนเซ็ตต่อวัน (1-3 เซ็ต สุ่มได้ตามต้องการ)
-        sets_today = random.choice([2, 3])  # ตัวอย่าง: สุ่มวันละ 2 หรือ 3 เซ็ต
+        # สุ่มจำนวนเซ็ตต่อวัน (1–3 เซ็ต)
+        sets_today = random.choice([1, 2, 3])
         
-        for set_index in range(sets_today):
-            for rep_index in range(10):  # 10 ครั้ง = 1 เซ็ต
-                # เลือกท่าออกกำลังกายแบบวน
-                exercise = exercises[rep_index % len(exercises)]
-                
-                # เวลาสมมติ เพิ่ม 7 วินาทีต่อครั้ง (เหมือนตัวอย่าง)
-                time_offset = timedelta(seconds=7 * (rep_index + set_index * 10))
-                timestamp = day + time_offset
-                
-                line = f"[{timestamp.strftime('%Y-%m-%d %H:%M:%S')}] เซ็ตที่ {set_index} ครั้งที่ {rep_index} : {exercise}\n"
-                f.write(line)
-        
-        # เพิ่มบรรทัดว่างระหว่างวัน
-        f.write("\n")
+        for set_index in range(1, sets_today + 1):
+            # 1 เซ็ต = 10 ครั้ง, 1 ครั้ง = ทำครบ 5 ท่า
+            for rep_index in range(1, 11):  # 10 ครั้งต่อเซ็ต
+                for pose_index, exercise in enumerate(exercises, start=1):
+                    # เพิ่มเวลาต่อเนื่อง (แต่ละท่าห่างกัน 7 วินาที)
+                    seconds_passed = ((rep_index - 1) * len(exercises) + pose_index) * 7
+                    timestamp = day + timedelta(seconds=seconds_passed)
+                    
+                    line = f"[{timestamp.strftime('%Y-%m-%d %H:%M:%S')}] เซ็ตที่ {set_index} ครั้งที่ {rep_index} : {exercise}\n"
+                    f.write(line)
+
 
 print(f"สร้างไฟล์ {FILE_PATH} เสร็จเรียบร้อย!")
