@@ -26,7 +26,7 @@
 ![History Page](pictures/log.png)
 ---
 
-**Video of use / วิดีโอการใช้งาน : https://youtu.be/RKpKp6dGnQQ
+Video of use / วิดีโอการใช้งาน : https://youtu.be/RKpKp6dGnQQ
 
 ## 🚀 วิธีใช้งาน (Usage)
 
