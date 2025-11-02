@@ -23,8 +23,10 @@
 ![Main UI](pictures/main.png)
 
 **รายงานย้อนหลัง:**
-![History Page](pictures/log.png)
+![History Page](pictures/Log.png)
 ---
+
+**Video of use / วิดีโอการใช้งาน : https://youtu.be/RKpKp6dGnQQ
 
 ## 🚀 วิธีใช้งาน (Usage)
 
