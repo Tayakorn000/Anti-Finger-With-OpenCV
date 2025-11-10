@@ -20,7 +20,7 @@
 ## 🎬 ตัวอย่าง UI
 
 **หน้าหลัก:**
-![Main UI](pictures/main.png)
+![Main UI](pictures/main1.png)
 
 **รายงานย้อนหลัง:**
 ![History Page](pictures/log.png)
